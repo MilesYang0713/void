@@ -1,9 +1,7 @@
+import Universe from "./components/Universe";
+
 function App() {
-  return (
-    <>
-      <h1>Project Aether</h1>
-    </>
-  )
+  return <Universe />;
 }
 
-export default App
+export default App;
