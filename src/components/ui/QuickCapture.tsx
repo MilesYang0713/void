@@ -9,6 +9,7 @@ export interface QuickCapturePayload {
   title: string
   description: string
   parentId: string | null
+  mode: CaptureMode
 }
 
 interface QuickCaptureProps {
@@ -59,6 +60,7 @@ export default function QuickCapture({ mode, language, ideas, currentId, onClose
       title: cleanTitle,
       description: description.trim(),
       parentId: mode === 'quick' ? null : parentId || null,
+      mode,
     })
   }
 
@@ -118,7 +120,7 @@ export default function QuickCapture({ mode, language, ideas, currentId, onClose
 
         {isQuick ? (
           <div className="quick-capture__root-note">
-            <span>◌</span>
+            <span>▣</span>
             <div>
               <strong>{copy.quickDefaultRoot}</strong>
               <small>{copy.quickDefaultRootHint}</small>

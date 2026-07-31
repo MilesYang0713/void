@@ -1,5 +1,5 @@
 import type { Language } from '../i18n'
-import type { IdeaNodeData } from '../types'
+import type { DeletedIdeaItem, IdeaNodeData, VersionHistoryEntry } from '../types'
 
 const DATABASE_NAME = 'void-local-first'
 const DATABASE_VERSION = 1
@@ -9,6 +9,9 @@ const BACKUP_STORE = 'conflict-backups'
 export interface LocalSpaceSnapshot {
   userId: string
   ideas: IdeaNodeData[]
+  inbox: IdeaNodeData[]
+  blackHole: DeletedIdeaItem[]
+  versionHistory: VersionHistoryEntry[]
   language: Language
   updatedAt: string
   dirty: boolean

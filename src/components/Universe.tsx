@@ -32,6 +32,8 @@ interface UniverseProps {
   onMoveRoot: (id: string, position: Vec3) => void
   onNestNode: (movingId: string, targetId: string, sourcePosition: Vec3, targetPosition: Vec3, sourceScale: number, targetScale: number) => void
   onDetachNode: (movingId: string, sourcePosition: Vec3, targetPosition: Vec3, sourceScale: number) => void
+  onMoveToInbox: (id: string) => void
+  onInboxDragHover?: (active: boolean) => void
   relationTransition: RelationTransition | null
   onDragStatusChange?: (status: DragStatus | null) => void
 }
@@ -49,6 +51,11 @@ interface PointerSession {
   startX: number
   startY: number
   startedAt: number
+}
+
+function isInboxDropZone(clientX: number, clientY: number) {
+  const element = document.elementFromPoint(clientX, clientY)
+  return Boolean(element?.closest('[data-inbox-dropzone]'))
 }
 
 function useInteractionLabels(language: Language) {
@@ -72,6 +79,8 @@ interface RootClusterProps {
   onSelect: UniverseProps['onSelect']
   onMoveRoot: UniverseProps['onMoveRoot']
   onNestNode: UniverseProps['onNestNode']
+  onMoveToInbox: UniverseProps['onMoveToInbox']
+  onInboxDragHover: NonNullable<UniverseProps['onInboxDragHover']>
   onDropTargetChange: (targetId: string | null, targetTitle: string | null) => void
   onDragStateChange: (rootId: string, title: string, dragging: boolean) => void
 }
@@ -88,6 +97,8 @@ function RootCluster({
   onSelect,
   onMoveRoot,
   onNestNode,
+  onMoveToInbox,
+  onInboxDragHover,
   onDropTargetChange,
   onDragStateChange,
 }: RootClusterProps) {
@@ -117,6 +128,7 @@ function RootCluster({
   const projectedPositionRef = useRef(new THREE.Vector3())
   const worldPositionRef = useRef(new THREE.Vector3())
   const currentDropTargetRef = useRef<{ id: string; title: string } | null>(null)
+  const inboxDropRef = useRef(false)
 
   const previewLayout = useMemo(() => {
     const desiredLayout = createRecursivePreviewLayout(root.children)
@@ -277,6 +289,18 @@ function RootCluster({
 
       if (!draggingRef.current) return
       event.preventDefault()
+
+      const overInbox = isInboxDropZone(event.clientX, event.clientY)
+      if (inboxDropRef.current !== overInbox) {
+        inboxDropRef.current = overInbox
+        onInboxDragHover(overInbox)
+      }
+      if (overInbox) {
+        currentDropTargetRef.current = null
+        onDropTargetChange(null, null)
+        return
+      }
+
       const intersection = pointerToPlane(event.clientX, event.clientY)
       if (!intersection) return
       dragTargetRef.current.copy(intersection).add(dragOffsetRef.current)
@@ -294,7 +318,9 @@ function RootCluster({
 
       const target = currentDropTargetRef.current
       const group = groupRef.current
-      if (target && group) {
+      if (inboxDropRef.current) {
+        onMoveToInbox(root.id)
+      } else if (target && group) {
         const targetEntry = clusterRegistry.current.get(target.id)
         if (targetEntry) {
           group.getWorldPosition(worldPositionRef.current)
@@ -311,6 +337,8 @@ function RootCluster({
         onMoveRoot(root.id, [group.position.x, group.position.y, group.position.z])
       }
 
+      inboxDropRef.current = false
+      onInboxDragHover(false)
       currentDropTargetRef.current = null
       onDropTargetChange(null, null)
       draggingRef.current = false
@@ -332,7 +360,7 @@ function RootCluster({
       window.removeEventListener('pointercancel', finishPointer)
       clearLongPressTimer()
     }
-  }, [activateDrag, clearLongPressTimer, findDropTarget, onDragStateChange, onDropTargetChange, onMoveRoot, onNestNode, pointerToPlane, root.id, root.title])
+  }, [activateDrag, clearLongPressTimer, findDropTarget, onDragStateChange, onDropTargetChange, onInboxDragHover, onMoveRoot, onMoveToInbox, onNestNode, pointerToPlane, root.id, root.title])
 
   useFrame(({ clock }, delta) => {
     const group = groupRef.current
@@ -481,11 +509,12 @@ function RootCluster({
   )
 }
 
-interface RootClustersProps extends Pick<UniverseProps, 'roots' | 'language' | 'onSelect' | 'onMoveRoot' | 'onNestNode' | 'relationTransition' | 'transition'> {
+interface RootClustersProps extends Pick<UniverseProps, 'roots' | 'language' | 'onSelect' | 'onMoveRoot' | 'onNestNode' | 'onMoveToInbox' | 'relationTransition' | 'transition'> {
   onDragStatusChange: (status: DragStatus | null) => void
+  onInboxDragHover: NonNullable<UniverseProps['onInboxDragHover']>
 }
 
-function RootClusters({ roots, language, onSelect, onMoveRoot, onNestNode, relationTransition, transition, onDragStatusChange }: RootClustersProps) {
+function RootClusters({ roots, language, onSelect, onMoveRoot, onNestNode, onMoveToInbox, relationTransition, transition, onDragStatusChange, onInboxDragHover }: RootClustersProps) {
   const positionCacheRef = useRef<Map<string, Vec3>>(new Map())
   const clusterRegistry = useRef<ClusterRegistry>(new Map())
   const [draggingSource, setDraggingSource] = useState<{ id: string; title: string } | null>(null)
@@ -558,6 +587,8 @@ function RootClusters({ roots, language, onSelect, onMoveRoot, onNestNode, relat
           onSelect={onSelect}
           onMoveRoot={onMoveRoot}
           onNestNode={onNestNode}
+          onMoveToInbox={onMoveToInbox}
+          onInboxDragHover={onInboxDragHover}
           onDropTargetChange={handleDropTargetChange}
           onDragStateChange={handleDragStateChange}
         />
@@ -581,6 +612,8 @@ interface FocusedChildNodeProps {
   onSelect: UniverseProps['onSelect']
   onNestNode: UniverseProps['onNestNode']
   onDetachNode: UniverseProps['onDetachNode']
+  onMoveToInbox: UniverseProps['onMoveToInbox']
+  onInboxDragHover: NonNullable<UniverseProps['onInboxDragHover']>
   relationTransition: RelationTransition | null
   onDropTargetChange: (targetId: string | null, targetTitle: string | null) => void
   onDragStateChange: (id: string, title: string, dragging: boolean) => void
@@ -602,6 +635,8 @@ function FocusedChildNode({
   onSelect,
   onNestNode,
   onDetachNode,
+  onMoveToInbox,
+  onInboxDragHover,
   relationTransition,
   onDropTargetChange,
   onDragStateChange,
@@ -631,6 +666,7 @@ function FocusedChildNode({
   const projectedPositionRef = useRef(new THREE.Vector3())
   const worldPositionRef = useRef(new THREE.Vector3())
   const currentDropTargetRef = useRef<{ id: string; title: string } | null>(null)
+  const inboxDropRef = useRef(false)
 
   const setGroupRef = useCallback((group: THREE.Group | null) => {
     groupRef.current = group
@@ -723,6 +759,20 @@ function FocusedChildNode({
 
       if (!draggingRef.current) return
       event.preventDefault()
+
+      const overInbox = isInboxDropZone(event.clientX, event.clientY)
+      if (inboxDropRef.current !== overInbox) {
+        inboxDropRef.current = overInbox
+        onInboxDragHover(overInbox)
+      }
+      if (overInbox) {
+        currentDropTargetRef.current = null
+        onDropTargetChange(null, null)
+        detachReadyRef.current = false
+        onDetachStateChange(0, false)
+        return
+      }
+
       const intersection = pointerToPlane(event.clientX, event.clientY)
       if (!intersection) return
       dragTargetRef.current.copy(intersection).add(dragOffsetRef.current)
@@ -747,7 +797,9 @@ function FocusedChildNode({
 
       if (!draggingRef.current) return
       const target = currentDropTargetRef.current
-      if (target && groupRef.current) {
+      if (inboxDropRef.current) {
+        onMoveToInbox(node.id)
+      } else if (target && groupRef.current) {
         const targetEntry = registry.current.get(target.id)
         if (targetEntry) {
           groupRef.current.getWorldPosition(worldPositionRef.current)
@@ -776,6 +828,8 @@ function FocusedChildNode({
 
       detachReadyRef.current = false
       onDetachStateChange(0, false)
+      inboxDropRef.current = false
+      onInboxDragHover(false)
       currentDropTargetRef.current = null
       onDropTargetChange(null, null)
       draggingRef.current = false
@@ -797,7 +851,7 @@ function FocusedChildNode({
       window.removeEventListener('pointercancel', finishPointer)
       clearLongPressTimer()
     }
-  }, [activateDrag, clearLongPressTimer, findDropTarget, index, node.id, node.title, onDetachNode, onDetachStateChange, onDragStateChange, onDropTargetChange, onNestNode, orbitFrameRef, pointerToPlane])
+  }, [activateDrag, clearLongPressTimer, findDropTarget, index, node.id, node.title, onDetachNode, onDetachStateChange, onDragStateChange, onDropTargetChange, onInboxDragHover, onMoveToInbox, onNestNode, orbitFrameRef, pointerToPlane])
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -884,11 +938,13 @@ interface FocusedChildrenProps {
   onSelect: UniverseProps['onSelect']
   onNestNode: UniverseProps['onNestNode']
   onDetachNode: UniverseProps['onDetachNode']
+  onMoveToInbox: UniverseProps['onMoveToInbox']
+  onInboxDragHover: NonNullable<UniverseProps['onInboxDragHover']>
   relationTransition: RelationTransition | null
   onDragStatusChange: (status: DragStatus | null) => void
 }
 
-function FocusedChildren({ currentNode, movingBackChildIndex, transition, language, onSelect, onNestNode, onDetachNode, relationTransition, onDragStatusChange }: FocusedChildrenProps) {
+function FocusedChildren({ currentNode, movingBackChildIndex, transition, language, onSelect, onNestNode, onDetachNode, onMoveToInbox, onInboxDragHover, relationTransition, onDragStatusChange }: FocusedChildrenProps) {
   const registry = useRef<ClusterRegistry>(new Map())
   const orbitFrameRef = useRef<THREE.Group>(null)
   const orbitAngleRef = useRef(0)
@@ -1053,6 +1109,8 @@ function FocusedChildren({ currentNode, movingBackChildIndex, transition, langua
                 onSelect={onSelect}
                 onNestNode={onNestNode}
                 onDetachNode={onDetachNode}
+                onMoveToInbox={onMoveToInbox}
+                onInboxDragHover={onInboxDragHover}
                 relationTransition={relationTransition}
                 onDetachStateChange={handleDetachStateChange}
                 onDropTargetChange={handleDropTargetChange}
@@ -1076,6 +1134,8 @@ function FocusedCluster({
   onBack,
   onNestNode,
   onDetachNode,
+  onMoveToInbox,
+  onInboxDragHover,
   relationTransition,
   onDragStatusChange,
 }: Omit<UniverseProps, 'roots' | 'onMoveRoot'> & { currentNode: IdeaNodeData }) {
@@ -1152,6 +1212,8 @@ function FocusedCluster({
         onSelect={onSelect}
         onNestNode={onNestNode}
         onDetachNode={onDetachNode}
+        onMoveToInbox={onMoveToInbox}
+        onInboxDragHover={onInboxDragHover ?? (() => undefined)}
         relationTransition={relationTransition}
         onDragStatusChange={onDragStatusChange ?? (() => undefined)}
       />
@@ -1160,7 +1222,7 @@ function FocusedCluster({
 }
 
 function Scene(props: UniverseProps) {
-  const { roots, currentNode, language, onSelect, onMoveRoot, onNestNode, relationTransition, transition, onDragStatusChange } = props
+  const { roots, currentNode, language, onSelect, onMoveRoot, onNestNode, onMoveToInbox, onInboxDragHover, relationTransition, transition, onDragStatusChange } = props
   const [draggingNode, setDraggingNode] = useState(false)
 
   const handleDragStatusChange = (status: DragStatus | null) => {
@@ -1191,6 +1253,8 @@ function Scene(props: UniverseProps) {
             onSelect={onSelect}
             onMoveRoot={onMoveRoot}
             onNestNode={onNestNode}
+            onMoveToInbox={onMoveToInbox}
+            onInboxDragHover={onInboxDragHover ?? (() => undefined)}
             relationTransition={relationTransition}
             transition={transition}
             onDragStatusChange={handleDragStatusChange}

@@ -1,4 +1,4 @@
-import type { IdeaNodeData, Vec3 } from '../types'
+import type { GrowthEntry, GrowthEntryType, IdeaNodeData, Vec3 } from '../types'
 
 export function findNode(nodes: IdeaNodeData[], id: string | null): IdeaNodeData | null {
   if (!id) return null
@@ -30,6 +30,34 @@ function isVec3(value: unknown): value is Vec3 {
     && value.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
 }
 
+
+function normalizeGrowthEntries(node: IdeaNodeData, fallbackDate: string): GrowthEntry[] {
+  if (Array.isArray(node.growthEntries)) {
+    return node.growthEntries
+      .filter((entry) => entry && typeof entry.content === 'string')
+      .map((entry) => ({
+        ...entry,
+        id: entry.id || makeGrowthEntryId(),
+        type: (['created', 'note', 'edit', 'branch', 'move', 'relation', 'inbox', 'restore', 'delete', 'origin', 'addition', 'inference', 'question', 'action', 'revision'] as GrowthEntryType[]).includes(entry.type) ? entry.type : 'note',
+        content: entry.content.trim(),
+        createdAt: entry.createdAt || fallbackDate,
+        updatedAt: entry.updatedAt || entry.createdAt || fallbackDate,
+        completed: entry.type === 'action' ? Boolean(entry.completed) : undefined,
+      }))
+      .filter((entry) => entry.content.length > 0)
+  }
+
+  const description = typeof node.description === 'string' ? node.description.trim() : ''
+  if (!description) return []
+  return [{
+    id: `origin-${node.id}`,
+    type: 'created',
+    content: description,
+    createdAt: node.createdAt || fallbackDate,
+    updatedAt: node.createdAt || fallbackDate,
+  }]
+}
+
 export function normalizeTree(nodes: IdeaNodeData[]): IdeaNodeData[] {
   return nodes.map((node) => {
     const children = normalizeTree(Array.isArray(node.children) ? node.children : [])
@@ -44,6 +72,7 @@ export function normalizeTree(nodes: IdeaNodeData[]): IdeaNodeData[] {
         : children.length,
       lastAccessedAt: node.lastAccessedAt || fallbackDate,
       position: isVec3(node.position) ? node.position : undefined,
+      growthEntries: normalizeGrowthEntries(node, fallbackDate),
     }
   })
 }
@@ -259,6 +288,7 @@ export function cloneTree(nodes: IdeaNodeData[]): IdeaNodeData[] {
   return normalizeTree(nodes.map((node) => ({
     ...node,
     position: node.position ? [...node.position] as Vec3 : undefined,
+    growthEntries: (node.growthEntries ?? []).map((entry) => ({ ...entry })),
     children: cloneTree(node.children),
   })))
 }
@@ -266,6 +296,7 @@ export function cloneTree(nodes: IdeaNodeData[]): IdeaNodeData[] {
 interface ActivityStats {
   visits: number
   creations: number
+  growth: number
   descendants: number
   latestActivity: number
 }
@@ -275,6 +306,7 @@ function collectActivity(node: IdeaNodeData): ActivityStats {
   let stats: ActivityStats = {
     visits: node.accessCount ?? 0,
     creations: node.childCreationCount ?? node.children.length,
+    growth: node.growthEntries?.length ?? 0,
     descendants: node.children.length,
     latestActivity: Number.isFinite(ownTimestamp) ? ownTimestamp : 0,
   }
@@ -284,6 +316,7 @@ function collectActivity(node: IdeaNodeData): ActivityStats {
     stats = {
       visits: stats.visits + childStats.visits,
       creations: stats.creations + childStats.creations,
+      growth: stats.growth + childStats.growth,
       descendants: stats.descendants + childStats.descendants,
       latestActivity: Math.max(stats.latestActivity, childStats.latestActivity),
     }
@@ -297,6 +330,7 @@ export function calculateActivityLevel(node: IdeaNodeData): number {
   const visitScore = 1 - Math.exp(-stats.visits / 10)
   const creationScore = 1 - Math.exp(-stats.creations / 8)
   const branchScore = 1 - Math.exp(-stats.descendants / 9)
+  const growthScore = 1 - Math.exp(-stats.growth / 12)
   const ageDays = stats.latestActivity > 0
     ? Math.max(0, (Date.now() - stats.latestActivity) / 86_400_000)
     : 999
@@ -306,7 +340,7 @@ export function calculateActivityLevel(node: IdeaNodeData): number {
     1,
     Math.max(
       0.16,
-      0.16 + visitScore * 0.34 + creationScore * 0.22 + branchScore * 0.22 + recencyScore * 0.06,
+      0.16 + visitScore * 0.28 + creationScore * 0.19 + branchScore * 0.18 + growthScore * 0.15 + recencyScore * 0.04,
     ),
   )
 }
@@ -317,4 +351,67 @@ export function makeIdeaId() {
   }
 
   return `idea-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+export function getParentId(nodes: IdeaNodeData[], id: string): string | null | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return null
+    if (node.children.some((child) => child.id === id)) return node.id
+    const nested = getParentId(node.children, id)
+    if (nested !== undefined) return nested
+  }
+  return undefined
+}
+
+export function extractNode(
+  nodes: IdeaNodeData[],
+  id: string,
+): { nodes: IdeaNodeData[]; extracted: IdeaNodeData | null; parentId: string | null } {
+  const parentId = getParentId(nodes, id)
+  if (parentId === undefined) return { nodes, extracted: null, parentId: null }
+  const result = detachNode(nodes, id)
+  return { nodes: result.nodes, extracted: result.detached, parentId }
+}
+
+export function removeInboxMetadata(node: IdeaNodeData): IdeaNodeData {
+  const { inboxOrigin: _inboxOrigin, ...rest } = node
+  return {
+    ...rest,
+    children: node.children.map(removeInboxMetadata),
+  }
+}
+
+export function replaceNodeChildren(
+  nodes: IdeaNodeData[],
+  id: string,
+  children: IdeaNodeData[],
+): IdeaNodeData[] {
+  return nodes.map((node) => node.id === id
+    ? { ...node, children, updatedAt: new Date().toISOString() }
+    : { ...node, children: replaceNodeChildren(node.children, id, children) })
+}
+
+
+export function makeGrowthEntryId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `growth-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+export function updateGrowthEntries(
+  nodes: IdeaNodeData[],
+  id: string,
+  updater: (entries: GrowthEntry[]) => GrowthEntry[],
+): IdeaNodeData[] {
+  return nodes.map((node) => {
+    if (node.id === id) {
+      const timestamp = new Date().toISOString()
+      return {
+        ...node,
+        growthEntries: updater((node.growthEntries ?? []).map((entry) => ({ ...entry }))),
+        updatedAt: timestamp,
+        lastAccessedAt: timestamp,
+      }
+    }
+    return { ...node, children: updateGrowthEntries(node.children, id, updater) }
+  })
 }
