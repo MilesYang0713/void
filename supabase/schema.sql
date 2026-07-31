@@ -72,3 +72,46 @@ begin
     alter publication supabase_realtime add table public.user_spaces;
   end if;
 end $$;
+
+-- VOID v0.15.2 cloud backup history.
+-- Safe to run repeatedly. Backups are isolated per user with RLS.
+create table if not exists public.cloud_backups (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  ideas jsonb not null,
+  language text not null default 'zh-CN' check (language in ('zh-CN', 'en')),
+  source text not null default 'automatic' check (source in ('automatic', 'manual', 'pre_restore')),
+  client_updated_at timestamptz not null,
+  idea_count integer not null default 0 check (idea_count >= 0),
+  inbox_count integer not null default 0 check (inbox_count >= 0),
+  black_hole_count integer not null default 0 check (black_hole_count >= 0),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists cloud_backups_user_created_idx
+on public.cloud_backups (user_id, created_at desc);
+
+alter table public.cloud_backups enable row level security;
+
+grant select, insert, delete on public.cloud_backups to authenticated;
+
+drop policy if exists "Users can read their own VOID backups" on public.cloud_backups;
+create policy "Users can read their own VOID backups"
+on public.cloud_backups
+for select
+to authenticated
+using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can create their own VOID backups" on public.cloud_backups;
+create policy "Users can create their own VOID backups"
+on public.cloud_backups
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can delete their own VOID backups" on public.cloud_backups;
+create policy "Users can delete their own VOID backups"
+on public.cloud_backups
+for delete
+to authenticated
+using ((select auth.uid()) = user_id);
