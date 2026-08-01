@@ -10,6 +10,7 @@ interface Props {
   onAdd: (content: string) => void
   onRevise: (id: string, content: string, mode: 'overwrite' | 'append') => void
   onOpenIdea: (id: string) => void
+  embedded?: boolean
 }
 
 interface ThemeItem {
@@ -51,7 +52,7 @@ function isEditableEntry(entry: GrowthEntry) {
   return ['note', 'addition', 'inference', 'question', 'action', 'revision'].includes(entry.type)
 }
 
-export default function GrowthPanel({ node, isRoot, language, onClose, onAdd, onRevise, onOpenIdea }: Props) {
+export default function GrowthPanel({ node, isRoot, language, onClose, onAdd, onRevise, onOpenIdea, embedded = false }: Props) {
   const zh = language === 'zh-CN'
   const labels: Record<GrowthEntryType, string> = zh
     ? {
@@ -212,16 +213,17 @@ export default function GrowthPanel({ node, isRoot, language, onClose, onAdd, on
     )
   }
 
-  return (
-    <div className="modal-backdrop growth-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="growth-panel" onMouseDown={(event) => event.stopPropagation()}>
+  const panel = (
+      <section className={`growth-panel ${embedded ? 'growth-panel--embedded' : ''}`} onMouseDown={embedded ? undefined : (event) => event.stopPropagation()}>
         <header className="growth-panel__header">
           <div>
             <span>{zh ? '操作日历' : 'Activity calendar'}</span>
             <h2>{node.title}</h2>
             <p>{zh ? `${entries.length} 个时间节点` : `${entries.length} timeline events`}</p>
           </div>
-          <button type="button" className="icon-button" onClick={onClose}>×</button>
+          {embedded
+            ? <button type="button" className="mobile-page-back mobile-page-back--panel" onClick={onClose}>‹ <span>{zh ? '返回主题' : 'Back to theme'}</span></button>
+            : <button type="button" className="icon-button" onClick={onClose}>×</button>}
         </header>
 
         <nav className="growth-tabs">
@@ -264,6 +266,12 @@ export default function GrowthPanel({ node, isRoot, language, onClose, onAdd, on
           </div>
         )}
       </section>
+  )
+
+  if (embedded) return panel
+  return (
+    <div className="modal-backdrop growth-backdrop" role="presentation" onMouseDown={onClose}>
+      {panel}
     </div>
   )
 }

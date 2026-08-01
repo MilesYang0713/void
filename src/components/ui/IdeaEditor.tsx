@@ -21,9 +21,20 @@ interface IdeaEditorProps {
   language: Language
   onCancel: () => void
   onSave: (draft: IdeaDraft) => void
+  embedded?: boolean
+  autoFocus?: boolean
 }
 
-export default function IdeaEditor({ mode, node, parentTitle, language, onCancel, onSave }: IdeaEditorProps) {
+export default function IdeaEditor({
+  mode,
+  node,
+  parentTitle,
+  language,
+  onCancel,
+  onSave,
+  embedded = false,
+  autoFocus = true,
+}: IdeaEditorProps) {
   const copy = UI_TEXT[language]
   const [title, setTitle] = useState(node?.title ?? '')
   const [description, setDescription] = useState(node?.description ?? '')
@@ -31,8 +42,8 @@ export default function IdeaEditor({ mode, node, parentTitle, language, onCancel
   const titleRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    titleRef.current?.focus()
-  }, [])
+    if (autoFocus) titleRef.current?.focus()
+  }, [autoFocus])
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -46,9 +57,12 @@ export default function IdeaEditor({ mode, node, parentTitle, language, onCancel
     })
   }
 
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
-      <form className="idea-editor" onSubmit={handleSubmit} onMouseDown={(event) => event.stopPropagation()}>
+  const form = (
+      <form
+        className={`idea-editor ${embedded ? 'idea-editor--embedded' : ''}`}
+        onSubmit={handleSubmit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <header className="idea-editor__header">
           <div>
             <span>{mode === 'create' ? copy.ideaBirth : copy.modifyIdea}</span>
@@ -108,6 +122,13 @@ export default function IdeaEditor({ mode, node, parentTitle, language, onCancel
           </button>
         </footer>
       </form>
+  )
+
+  if (embedded) return form
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      {form}
     </div>
   )
 }

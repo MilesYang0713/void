@@ -8,14 +8,31 @@ interface InboxDragPayload {
   nodeId: string
 }
 
+interface DestinationOption {
+  id: string
+  label: string
+  depth: number
+}
+
 interface IdeaInboxProps {
   items: IdeaNodeData[]
+  ideas: IdeaNodeData[]
   language: Language
   dropActive: boolean
   onClose: () => void
   onRestore: (id: string, original: boolean) => void
+  onOrganize: (id: string, parentId: string | null) => void
+  onDelete: (id: string) => void
   onExtractBranch: (inboxRootId: string, nodeId: string) => void
   onMoveIdeaIntoInbox: (id: string) => void
+  embedded?: boolean
+}
+
+function flattenDestinations(nodes: IdeaNodeData[], depth = 0): DestinationOption[] {
+  return nodes.flatMap((node) => [
+    { id: node.id, label: node.title, depth },
+    ...flattenDestinations(node.children, depth + 1),
+  ])
 }
 
 function NestedInboxTree({
@@ -53,43 +70,38 @@ function NestedInboxTree({
 
 export default function IdeaInbox({
   items,
+  ideas,
   language,
   dropActive,
   onClose,
   onRestore,
+  onOrganize,
+  onDelete,
   onExtractBranch,
   onMoveIdeaIntoInbox,
+  embedded = false,
 }: IdeaInboxProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [organizeId, setOrganizeId] = useState<string | null>(null)
+  const [organizeTarget, setOrganizeTarget] = useState('')
   const [nativeDragOver, setNativeDragOver] = useState(false)
+  const destinationOptions = useMemo(() => flattenDestinations(ideas), [ideas])
   const labels = language === 'zh-CN'
     ? {
-        title: '灵感收集箱',
-        eyebrow: '暂存与等待整理',
-        empty: '箱子还是空的。把暂时不处理的灵感或完整主题放进来。',
-        restoreRoot: '取出到虚空',
-        restoreOriginal: '放回原位',
-        expand: '打开主题',
-        collapse: '收起主题',
-        close: '关闭',
-        hint: '可以直接把箱内球拖到左侧虚空区域释放；在“思路路径”中也可以把节点拖回这个箱子。',
-        branch: '分支',
-        captured: '收纳于',
-        drop: '把思路路径中的节点拖到这里',
+        title: '灵感收集箱', eyebrow: '捕捉之后，再来整理',
+        empty: '这里还没有未整理速记。你可以先用速记把想法捕捉下来。',
+        restoreRoot: '转为主体', restoreOriginal: '放回原位', organise: '整理归入', confirmOrganise: '确认归入',
+        chooseDestination: '选择主题或分支', expand: '打开主题', collapse: '收起主题', close: '关闭', delete: '删除',
+        hint: '速记只负责捕捉。现在可以把它转为独立主体，或归入已有主题和分支。',
+        branch: '分支', captured: '记录于', drop: '把思路路径中的节点拖到这里', root: '作为新主体',
       }
     : {
-        title: 'Idea inbox',
-        eyebrow: 'Hold and organise later',
-        empty: 'The inbox is empty. Store ideas or complete themes here for later.',
-        restoreRoot: 'Release to void',
-        restoreOriginal: 'Restore original place',
-        expand: 'Open theme',
-        collapse: 'Collapse theme',
-        close: 'Close',
-        hint: 'Drag an item into the void area to release it. Nodes from the path view can also be dropped back into this box.',
-        branch: 'branches',
-        captured: 'Stored',
-        drop: 'Drop a node from the path view here',
+        title: 'Idea inbox', eyebrow: 'Capture first, organise later',
+        empty: 'There are no unsorted captures yet. Use Capture whenever a thought appears.',
+        restoreRoot: 'Make theme', restoreOriginal: 'Restore original', organise: 'Organise', confirmOrganise: 'File idea',
+        chooseDestination: 'Choose a theme or branch', expand: 'Open theme', collapse: 'Collapse theme', close: 'Close', delete: 'Delete',
+        hint: 'Capture only saves the thought. Here you can make it a theme or file it under an existing branch.',
+        branch: 'branches', captured: 'Captured', drop: 'Drop a node from the path view here', root: 'Create as new theme',
       }
 
   const sortedItems = useMemo(() => [...items].sort((a, b) => {
@@ -100,7 +112,7 @@ export default function IdeaInbox({
 
   return (
     <aside
-      className={`idea-inbox-panel ${dropActive || nativeDragOver ? 'idea-inbox-panel--drop-active' : ''}`}
+      className={`idea-inbox-panel ${embedded ? 'idea-inbox-panel--embedded' : ''} ${dropActive || nativeDragOver ? 'idea-inbox-panel--drop-active' : ''}`}
       data-inbox-panel
       data-inbox-dropzone
       onDragEnter={(event) => {
@@ -133,11 +145,8 @@ export default function IdeaInbox({
       }}
     >
       <header className="idea-inbox-panel__header">
-        <div>
-          <span>{labels.eyebrow}</span>
-          <h2>{labels.title}</h2>
-        </div>
-        <button type="button" className="panel-close" onClick={onClose} aria-label={labels.close}>×</button>
+        <div><span>{labels.eyebrow}</span><h2>{labels.title}</h2></div>
+        {!embedded && <button type="button" className="panel-close" onClick={onClose} aria-label={labels.close}>×</button>}
       </header>
 
       <div className="inbox-box-visual" data-inbox-dropzone>
@@ -149,8 +158,8 @@ export default function IdeaInbox({
         <div className="inbox-box-visual__body"><strong>{items.length}</strong><small>VOID</small></div>
       </div>
 
-      <p className="idea-inbox-panel__hint">{labels.hint}</p>
-      <div className="idea-inbox-panel__drop-hint">▣ {labels.drop}</div>
+      <p className="idea-inbox-panel__hint">{embedded ? labels.hint : labels.hint}</p>
+      {!embedded && <div className="idea-inbox-panel__drop-hint">▣ {labels.drop}</div>}
 
       <div className="inbox-items">
         {sortedItems.length === 0 && <div className="inbox-empty">{labels.empty}</div>}
@@ -158,18 +167,9 @@ export default function IdeaInbox({
           const descendants = countNodes(item.children)
           const isTheme = descendants > 0
           const expanded = expandedId === item.id
+          const organizing = organizeId === item.id
           return (
-            <article
-              key={item.id}
-              className={`inbox-card ${isTheme ? 'inbox-card--theme' : ''}`}
-              style={{ '--inbox-color': item.color } as CSSProperties}
-              draggable
-              onDragStart={(event) => {
-                const payload: InboxDragPayload = { inboxRootId: item.id, nodeId: item.id }
-                event.dataTransfer.setData('application/x-void-inbox', JSON.stringify(payload))
-                event.dataTransfer.effectAllowed = 'move'
-              }}
-            >
+            <article key={item.id} className={`inbox-card ${isTheme ? 'inbox-card--theme' : ''}`} style={{ '--inbox-color': item.color } as CSSProperties}>
               <div className="inbox-card__main">
                 <span className="inbox-card__orb" />
                 <div>
@@ -178,15 +178,36 @@ export default function IdeaInbox({
                   <small>{labels.captured} {new Date(item.inboxOrigin?.storedAt ?? item.updatedAt).toLocaleString(language === 'zh-CN' ? 'zh-CN' : 'en-AU')} · {descendants} {labels.branch}</small>
                 </div>
               </div>
-              <div className="inbox-card__actions">
-                <button type="button" onClick={() => onRestore(item.id, false)}>{labels.restoreRoot}</button>
-                <button type="button" onClick={() => onRestore(item.id, true)}>{labels.restoreOriginal}</button>
-                {isTheme && (
-                  <button type="button" onClick={() => setExpandedId(expanded ? null : item.id)}>
-                    {expanded ? labels.collapse : labels.expand}
-                  </button>
-                )}
+
+              <div className="inbox-card__actions inbox-card__actions--organise">
+                <button type="button" className="inbox-action-primary" onClick={() => {
+                  setOrganizeId(organizing ? null : item.id)
+                  setOrganizeTarget(destinationOptions[0]?.id ?? '')
+                }}>{labels.organise}</button>
+                <button type="button" onClick={() => onOrganize(item.id, null)}>{labels.restoreRoot}</button>
+                {item.inboxOrigin?.parentId && <button type="button" onClick={() => onRestore(item.id, true)}>{labels.restoreOriginal}</button>}
+                {isTheme && <button type="button" onClick={() => setExpandedId(expanded ? null : item.id)}>{expanded ? labels.collapse : labels.expand}</button>}
+                <button type="button" className="inbox-action-danger" onClick={() => onDelete(item.id)}>{labels.delete}</button>
               </div>
+
+              {organizing && (
+                <div className="inbox-organizer">
+                  <label>
+                    <span>{labels.chooseDestination}</span>
+                    <select value={organizeTarget} onChange={(event) => setOrganizeTarget(event.target.value)}>
+                      <option value="">◌ {labels.root}</option>
+                      {destinationOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{`${'　'.repeat(option.depth)}${option.depth > 0 ? '↳ ' : '◎ '}${option.label}`}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" onClick={() => {
+                    onOrganize(item.id, organizeTarget || null)
+                    setOrganizeId(null)
+                  }}>{labels.confirmOrganise}</button>
+                </div>
+              )}
+
               {expanded && (
                 <div className="inbox-card__tree">
                   {item.children.map((child) => (

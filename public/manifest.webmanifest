@@ -1,0 +1,22 @@
+{
+  "name": "VOID · 灵感宇宙",
+  "short_name": "VOID",
+  "description": "个人私网中的灵感捕捉与整理 App。",
+  "start_url": "/?mobile=1",
+  "display": "standalone",
+  "background_color": "#020207",
+  "theme_color": "#070510",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

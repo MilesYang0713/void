@@ -1,12 +1,14 @@
 {
   "name": "void-idea-space",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.19.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:private": "vite --host 127.0.0.1",
+    "preview:private": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
     "@react-three/drei": "10.7.7",

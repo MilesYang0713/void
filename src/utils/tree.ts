@@ -32,8 +32,8 @@ function isVec3(value: unknown): value is Vec3 {
 
 
 function normalizeGrowthEntries(node: IdeaNodeData, fallbackDate: string): GrowthEntry[] {
-  if (Array.isArray(node.growthEntries)) {
-    return node.growthEntries
+  const normalized = Array.isArray(node.growthEntries)
+    ? node.growthEntries
       .filter((entry) => entry && typeof entry.content === 'string')
       .map((entry) => ({
         ...entry,
@@ -45,16 +45,18 @@ function normalizeGrowthEntries(node: IdeaNodeData, fallbackDate: string): Growt
         completed: entry.type === 'action' ? Boolean(entry.completed) : undefined,
       }))
       .filter((entry) => entry.content.length > 0)
-  }
+    : []
+
+  if (normalized.length > 0) return normalized
 
   const description = typeof node.description === 'string' ? node.description.trim() : ''
-  if (!description) return []
   return [{
     id: `origin-${node.id}`,
     type: 'created',
-    content: description,
+    content: description ? `创建灵感。初始简介：${description}` : '创建了这颗灵感',
     createdAt: node.createdAt || fallbackDate,
     updatedAt: node.createdAt || fallbackDate,
+    editable: false,
   }]
 }
 

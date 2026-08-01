@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Language } from '../../i18n'
 import { UI_TEXT } from '../../i18n'
 import VersionHistoryPanel from './VersionHistoryPanel'
@@ -34,6 +34,11 @@ interface SettingsPanelProps {
   onAddVersionEntry: (draft: Omit<VersionHistoryEntry, 'id' | 'createdAt' | 'updatedAt'>) => void
   onUpdateVersionEntry: (id: string, draft: Omit<VersionHistoryEntry, 'id' | 'createdAt' | 'updatedAt'>) => void
   onDeleteVersionEntry: (id: string) => void
+  mobileFloatingQuickEnabled?: boolean
+  mobileFloatingQuickOpacity?: number
+  onMobileFloatingQuickEnabledChange?: (enabled: boolean) => void
+  onMobileFloatingQuickOpacityChange?: (opacity: number) => void
+  embedded?: boolean
 }
 
 function formatBackupTime(value: string, language: Language) {
@@ -71,6 +76,11 @@ export default function SettingsPanel({
   onAddVersionEntry,
   onUpdateVersionEntry,
   onDeleteVersionEntry,
+  mobileFloatingQuickEnabled,
+  mobileFloatingQuickOpacity,
+  onMobileFloatingQuickEnabledChange,
+  onMobileFloatingQuickOpacityChange,
+  embedded = false,
 }: SettingsPanelProps) {
   const copy = UI_TEXT[language]
   const inputRef = useRef<HTMLInputElement>(null)
@@ -116,18 +126,81 @@ export default function SettingsPanel({
   }
 
   return (
-    <aside className="settings-panel" aria-label={copy.settingsTitle}>
+    <aside className={`settings-panel ${embedded ? 'settings-panel--embedded' : ''}`} aria-label={copy.settingsTitle}>
       <header className="settings-panel__header">
         <div>
           <span>{copy.settingsEyebrow}</span>
           <h2>{copy.settingsTitle}</h2>
         </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label={copy.close}>
-          ×
-        </button>
+        {!embedded && (
+          <button type="button" className="icon-button" onClick={onClose} aria-label={copy.close}>
+            ×
+          </button>
+        )}
       </header>
 
       <p className="settings-panel__description">{copy.settingsDescription}</p>
+
+      {typeof mobileFloatingQuickEnabled === 'boolean' && typeof mobileFloatingQuickOpacity === 'number' && onMobileFloatingQuickEnabledChange && onMobileFloatingQuickOpacityChange && (
+        <section className="settings-group mobile-floating-settings">
+          <div className="mobile-floating-settings__heading">
+            <div>
+              <span className="settings-group__label">{language === 'zh-CN' ? '主题桌面悬浮速记' : 'Floating capture on Themes'}</span>
+              <p>{language === 'zh-CN' ? '像辅助触控一样拖到顺手的位置，轻点直接进入速记。此设置仅保存在当前设备。' : 'Drag it to a comfortable position like AssistiveTouch, then tap to open Capture. This setting stays on this device.'}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={mobileFloatingQuickEnabled}
+              className={`mobile-settings-switch ${mobileFloatingQuickEnabled ? 'is-on' : ''}`}
+              onClick={() => onMobileFloatingQuickEnabledChange?.(!mobileFloatingQuickEnabled)}
+            >
+              <i />
+              <span>{mobileFloatingQuickEnabled ? (language === 'zh-CN' ? '已开启' : 'On') : (language === 'zh-CN' ? '已关闭' : 'Off')}</span>
+            </button>
+          </div>
+
+          <div className={`mobile-floating-opacity ${mobileFloatingQuickEnabled ? '' : 'is-disabled'}`}>
+            <div className="mobile-floating-opacity__preview" style={{ '--preview-opacity': mobileFloatingQuickOpacity } as CSSProperties}>
+              <span>⚡</span><small>{language === 'zh-CN' ? '速记' : 'Capture'}</small>
+            </div>
+            <label>
+              <span>{language === 'zh-CN' ? '透明度' : 'Opacity'}</span>
+              <strong>{Math.round(mobileFloatingQuickOpacity * 100)}%</strong>
+              <input
+                type="range"
+                min="0.25"
+                max="1"
+                step="0.05"
+                value={mobileFloatingQuickOpacity}
+                disabled={!mobileFloatingQuickEnabled}
+                onChange={(event) => onMobileFloatingQuickOpacityChange?.(Number(event.target.value))}
+              />
+            </label>
+          </div>
+        </section>
+      )}
+
+      {embedded && (
+        <section className="settings-group private-access-settings">
+          <div className="private-access-settings__heading">
+            <div>
+              <span className="settings-group__label">{language === 'zh-CN' ? '私人远程访问' : 'Private remote access'}</span>
+              <h3>{language === 'zh-CN' ? '本机运行 · Tailscale 私网' : 'Local host · Tailscale tailnet'}</h3>
+            </div>
+            <span className="private-access-settings__badge">PRIVATE</span>
+          </div>
+          <p>{language === 'zh-CN'
+            ? 'VOID 网页本体不部署到公网。电脑只监听本机端口，再由 Tailscale Serve 提供仅限你 tailnet 内设备访问的 HTTPS 地址。现有 Supabase 数据同步与 RLS 保持不变。'
+            : 'The VOID front end is not deployed publicly. Your computer listens only on localhost, while Tailscale Serve provides an HTTPS address limited to devices in your tailnet. Existing Supabase sync and RLS remain unchanged.'}</p>
+          <div className="private-access-settings__steps">
+            <code>npm run build</code>
+            <code>npm run preview:private</code>
+            <code>tailscale serve --bg 4173</code>
+          </div>
+          <small>{language === 'zh-CN' ? '不要运行 tailscale funnel；Funnel 会公开到互联网。详细步骤见项目中的 PRIVATE_ACCESS.md。' : 'Do not use Tailscale Funnel, which would expose the service publicly. See PRIVATE_ACCESS.md for setup.'}</small>
+        </section>
+      )}
 
       <section className={`settings-group evolution-settings-group ${evolutionOpen ? 'evolution-settings-group--open' : ''}`}>
         <button

@@ -10,6 +10,7 @@ import IdeaInbox from './components/ui/IdeaInbox'
 import GlobalSearch from './components/ui/GlobalSearch'
 import BlackHolePanel from './components/ui/BlackHolePanel'
 import GrowthPanel from './components/ui/GrowthPanel'
+import MobileShell, { type MobileTab } from './components/mobile/MobileShell'
 import { defaultIdeas } from './data/ideas'
 import { UI_TEXT } from './i18n'
 import { exportAllIdeasWord, exportIdeaWord } from './utils/wordExport'
@@ -104,12 +105,61 @@ const initialTransition: ViewTransition = {
   direction: 'jump',
 }
 
+
+function detectMobileInterface() {
+  const parameters = new URLSearchParams(window.location.search)
+  if (parameters.get('desktop') === '1') return false
+  if (parameters.get('mobile') === '1') return true
+  return window.matchMedia('(max-width: 820px)').matches
+}
+
+function readMobileFloatingQuickEnabled() {
+  const stored = window.localStorage.getItem('void-mobile-floating-quick-enabled')
+  return stored === null ? true : stored === 'true'
+}
+
+function readMobileFloatingQuickOpacity() {
+  const raw = window.localStorage.getItem('void-mobile-floating-quick-opacity')
+  if (raw === null) return 0.62
+  const stored = Number(raw)
+  return Number.isFinite(stored) ? Math.min(1, Math.max(0.25, stored)) : 0.62
+}
+
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
 }
 
 export default function App() {
+  const [mobileInterface, setMobileInterface] = useState(detectMobileInterface)
+  const [mobileTab, setMobileTab] = useState<MobileTab>('themes')
+  const [mobileFloatingQuickEnabled, setMobileFloatingQuickEnabled] = useState(readMobileFloatingQuickEnabled)
+  const [mobileFloatingQuickOpacity, setMobileFloatingQuickOpacity] = useState(readMobileFloatingQuickOpacity)
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 820px)')
+    const update = () => {
+      const parameters = new URLSearchParams(window.location.search)
+      if (parameters.get('desktop') === '1') setMobileInterface(false)
+      else if (parameters.get('mobile') === '1') setMobileInterface(true)
+      else setMobileInterface(media.matches)
+    }
+    media.addEventListener('change', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      media.removeEventListener('change', update)
+      window.removeEventListener('orientationchange', update)
+    }
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem('void-mobile-floating-quick-enabled', String(mobileFloatingQuickEnabled))
+  }, [mobileFloatingQuickEnabled])
+
+  useEffect(() => {
+    window.localStorage.setItem('void-mobile-floating-quick-opacity', String(mobileFloatingQuickOpacity))
+  }, [mobileFloatingQuickOpacity])
+
   const {
     configured,
     session,
@@ -330,8 +380,10 @@ export default function App() {
     setGrowthOpen(false)
     setEditor({ mode: 'create' })
   }
-  const openEdit = () => {
-    if (!selectedIdea) return
+  const openEditById = (id: string) => {
+    const node = findNode(ideas, id)
+    if (!node) return
+    setSelectedId(id)
     setTreeOpen(false)
     setSettingsOpen(false)
     setCaptureMode(null)
@@ -339,7 +391,12 @@ export default function App() {
     setInboxOpen(false)
     setBlackHoleOpen(false)
     setGrowthOpen(false)
-    setEditor({ mode: 'edit', nodeId: selectedIdea.id })
+    setEditor({ mode: 'edit', nodeId: id })
+  }
+
+  const openEdit = () => {
+    if (!selectedIdea) return
+    openEditById(selectedIdea.id)
   }
 
   const saveEditor = (draft: IdeaDraft) => {
@@ -687,6 +744,69 @@ export default function App() {
     window.setTimeout(() => setQuickToast((current) => current === toast ? null : current), 2600)
   }
 
+
+  const organizeInboxItem = (id: string, parentId: string | null) => {
+    const item = inbox.find((entry) => entry.id === id)
+    if (!item) return
+    const validParent = parentId && findNode(ideas, parentId) ? parentId : null
+    const destination = validParent ? findNode(ideas, validParent) : null
+    captureUndo(language === 'zh-CN' ? '整理灵感箱内容' : 'organise inbox item')
+    const timestamp = new Date().toISOString()
+    const position = validParent ? undefined : createRootPositions(ideas.length + 1).at(-1) ?? [2.8, -1.4, 0]
+    const clean = removeInboxMetadata(item)
+    const organized = appendNodeActivity({ ...clean, position, updatedAt: timestamp }, {
+      id: makeGrowthEntryId(),
+      type: 'restore',
+      content: validParent
+        ? (language === 'zh-CN' ? `从灵感箱整理到「${destination?.title ?? '主题'}」` : `Filed from the inbox under “${destination?.title ?? 'theme'}”`)
+        : (language === 'zh-CN' ? '从速记整理为新的主体' : 'Turned an inbox capture into a new theme'),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      field: 'location',
+      editable: false,
+    })
+    setInbox((current) => current.filter((entry) => entry.id !== id))
+    setIdeas((current) => insertNode(current, validParent, organized))
+    const toast = validParent
+      ? (language === 'zh-CN' ? `已归入「${destination?.title ?? '主题'}」` : `Filed under “${destination?.title ?? 'theme'}”`)
+      : (language === 'zh-CN' ? `「${item.title}」已成为主体` : `“${item.title}” is now a theme`)
+    setQuickToast(toast)
+    window.setTimeout(() => setQuickToast((current) => current === toast ? null : current), 2600)
+  }
+
+  const deleteInboxItem = (id: string) => {
+    const item = inbox.find((entry) => entry.id === id)
+    if (!item) return
+    const confirmed = window.confirm(language === 'zh-CN'
+      ? `将速记「${item.title}」移入黑洞吗？黑洞会保留 14 天。`
+      : `Move capture “${item.title}” into the black hole? It can be restored for 14 days.`)
+    if (!confirmed) return
+    captureUndo(language === 'zh-CN' ? '删除灵感箱内容' : 'delete inbox item')
+    const deletedAt = new Date().toISOString()
+    const deletedNode = appendNodeActivity(removeInboxMetadata(item), {
+      id: makeGrowthEntryId(),
+      type: 'delete',
+      content: language === 'zh-CN' ? '从灵感箱移入黑洞' : 'Moved from the inbox into the black hole',
+      createdAt: deletedAt,
+      updatedAt: deletedAt,
+      field: 'location',
+      editable: false,
+    })
+    const deleted: DeletedIdeaItem = {
+      id: `deleted-${item.id}-${Date.now()}`,
+      node: deletedNode,
+      originalParentId: item.inboxOrigin?.parentId ?? null,
+      originalPosition: item.inboxOrigin?.position,
+      deletedAt,
+      expiresAt: new Date(Date.parse(deletedAt) + BLACK_HOLE_RETENTION_MS).toISOString(),
+    }
+    setInbox((current) => current.filter((entry) => entry.id !== id))
+    setBlackHole((current) => [deleted, ...current])
+    const toast = language === 'zh-CN' ? `「${item.title}」已进入黑洞` : `“${item.title}” entered the black hole`
+    setQuickToast(toast)
+    window.setTimeout(() => setQuickToast((current) => current === toast ? null : current), 2400)
+  }
+
   const extractInboxBranch = (inboxRootId: string, nodeId: string) => {
     captureUndo(language === 'zh-CN' ? '取出主题分支' : 'extract stored branch')
     if (inboxRootId === nodeId) {
@@ -773,22 +893,26 @@ export default function App() {
     ]))
   }
 
-  const deleteSelected = () => {
-    if (!selectedIdea) return
-    const descendants = countNodes(selectedIdea.children)
+  const deleteIdeaById = (id: string): boolean => {
+    const path = findPath(ideas, id)
+    const target = path.at(-1) ?? null
+    const targetParent = path.length > 1 ? path.at(-2) ?? null : null
+    if (!target) return false
+
+    const descendants = countNodes(target.children)
     const confirmed = window.confirm(
       language === 'zh-CN'
-        ? `将「${selectedIdea.title}」移入黑洞吗？${descendants > 0 ? `\n它下面的 ${descendants} 个子灵感也会一起进入。` : ''}\n黑洞会保留 14 天，期间可以恢复。`
-        : `Move “${selectedIdea.title}” into the black hole?${descendants > 0 ? `\nIts ${descendants} descendants will move with it.` : ''}\nIt can be restored for 14 days.`,
+        ? `将「${target.title}」移入黑洞吗？${descendants > 0 ? `\n它下面的 ${descendants} 个子灵感也会一起进入。` : ''}\n黑洞会保留 14 天，期间可以恢复。`
+        : `Move “${target.title}” into the black hole?${descendants > 0 ? `\nIts ${descendants} descendants will move with it.` : ''}\nIt can be restored for 14 days.`,
     )
-    if (!confirmed) return
+    if (!confirmed) return false
 
     captureUndo(language === 'zh-CN' ? '删除到黑洞' : 'move to black hole')
-    const result = extractNode(ideas, selectedIdea.id)
-    if (!result.extracted) return
+    const result = extractNode(ideas, target.id)
+    if (!result.extracted) return false
     const deletedAt = new Date().toISOString()
     const item: DeletedIdeaItem = {
-      id: `deleted-${selectedIdea.id}-${Date.now()}`,
+      id: `deleted-${target.id}-${Date.now()}`,
       node: appendNodeActivity(result.extracted, {
         id: makeGrowthEntryId(),
         type: 'delete',
@@ -799,17 +923,23 @@ export default function App() {
         editable: false,
       }),
       originalParentId: result.parentId,
-      originalPosition: selectedIdea.position ? [...selectedIdea.position] as Vec3 : undefined,
+      originalPosition: target.position ? [...target.position] as Vec3 : undefined,
       deletedAt,
       expiresAt: new Date(Date.parse(deletedAt) + BLACK_HOLE_RETENTION_MS).toISOString(),
     }
     setIdeas(result.nodes)
     setBlackHole((current) => [item, ...current])
-    setSelectedId(parentIdea?.id ?? null)
+    setSelectedId(targetParent?.id ?? null)
     setViewTransition(initialTransition)
-    const toast = language === 'zh-CN' ? `「${selectedIdea.title}」已进入黑洞` : `“${selectedIdea.title}” entered the black hole`
+    const toast = language === 'zh-CN' ? `「${target.title}」已进入黑洞` : `“${target.title}” entered the black hole`
     setQuickToast(toast)
     window.setTimeout(() => setQuickToast((current) => current === toast ? null : current), 2400)
+    return true
+  }
+
+  const deleteSelected = () => {
+    if (!selectedIdea) return
+    deleteIdeaById(selectedIdea.id)
   }
 
   const restoreBlackHoleItem = (id: string) => {
@@ -947,6 +1077,148 @@ export default function App() {
         onSignIn={signIn}
         onSignUp={signUp}
       />
+    )
+  }
+
+  if (mobileInterface) {
+    const mobilePageContent = mobileTab === 'quick' ? (
+      <QuickCapture
+        embedded
+        mobileInstant
+        mode="quick"
+        language={language}
+        ideas={ideas}
+        currentId={selectedIdea?.id ?? null}
+        onClose={() => setMobileTab('themes')}
+        onSave={saveQuickCapture}
+      />
+    ) : mobileTab === 'inbox' ? (
+      <IdeaInbox
+        embedded
+        items={inbox}
+        ideas={ideas}
+        language={language}
+        dropActive={false}
+        onClose={() => setMobileTab('themes')}
+        onRestore={restoreInboxItem}
+        onOrganize={organizeInboxItem}
+        onDelete={deleteInboxItem}
+        onExtractBranch={extractInboxBranch}
+        onMoveIdeaIntoInbox={moveIdeaToInbox}
+      />
+    ) : mobileTab === 'settings' ? (
+      <SettingsPanel
+        embedded
+        language={language}
+        onLanguageChange={setLanguage}
+        onClose={() => setMobileTab('themes')}
+        accountEmail={session.user.email ?? ''}
+        syncStatus={syncStatus}
+        isOnline={isOnline}
+        lastSyncedAt={lastSyncedAt}
+        totalIdeas={totalIdeas}
+        onSyncNow={() => void syncNow()}
+        onExport={exportBackup}
+        onExportWordAll={() => exportAllIdeasWord(ideas)}
+        onImport={(file) => void importData(file)}
+        onSignOut={() => void leaveAccount()}
+        backupHistory={backupHistory}
+        backupHistoryStatus={backupHistoryStatus}
+        backupAction={backupAction}
+        onRefreshBackups={refreshBackupHistory}
+        onCreateBackup={createCloudBackup}
+        onRestoreBackup={restoreCloudBackup}
+        onDeleteBackup={deleteCloudBackup}
+        versionHistory={versionHistory}
+        onAddVersionEntry={addVersionEntry}
+        onUpdateVersionEntry={updateVersionEntry}
+        onDeleteVersionEntry={deleteVersionEntry}
+        mobileFloatingQuickEnabled={mobileFloatingQuickEnabled}
+        mobileFloatingQuickOpacity={mobileFloatingQuickOpacity}
+        onMobileFloatingQuickEnabledChange={setMobileFloatingQuickEnabled}
+        onMobileFloatingQuickOpacityChange={setMobileFloatingQuickOpacity}
+      />
+    ) : null
+
+    const mobileThemePageContent = captureMode === 'compose' ? (
+      <QuickCapture
+        embedded
+        mode="compose"
+        language={language}
+        ideas={ideas}
+        currentId={selectedIdea?.id ?? null}
+        onClose={() => setCaptureMode(null)}
+        onSave={saveQuickCapture}
+      />
+    ) : editor && editingNode ? (
+      <IdeaEditor
+        embedded
+        autoFocus={false}
+        mode={editor.mode}
+        node={editingNode}
+        parentTitle={selectedPath.length > 1 ? selectedPath.at(-2)?.title ?? null : null}
+        language={language}
+        onCancel={() => setEditor(null)}
+        onSave={saveEditor}
+      />
+    ) : growthOpen && selectedIdea ? (
+      <GrowthPanel
+        embedded
+        node={selectedIdea}
+        isRoot={selectedPath.length === 1}
+        language={language}
+        onClose={() => setGrowthOpen(false)}
+        onAdd={addGrowthEntry}
+        onRevise={reviseGrowthEntry}
+        onOpenIdea={(id) => setSelectedId(id)}
+      />
+    ) : null
+
+    return (
+      <>
+        <MobileShell
+          ideas={ideas}
+          inboxCount={inbox.length}
+          language={language}
+          syncStatus={syncStatus}
+          isOnline={isOnline}
+          accountEmail={session.user.email ?? ''}
+          activeTab={mobileTab}
+          pageContent={mobilePageContent}
+          themePageContent={mobileThemePageContent}
+          onTabChange={(tab) => {
+            setGrowthOpen(false)
+            setEditor(null)
+            setCaptureMode(null)
+            setInboxOpen(false)
+            setSettingsOpen(false)
+            setMobileTab(tab)
+          }}
+          onThemeChange={setSelectedId}
+          onCompose={(parentId) => {
+            setSelectedId(parentId)
+            setGrowthOpen(false)
+            setEditor(null)
+            setCaptureMode('compose')
+            setMobileTab('themes')
+          }}
+          onOpenGrowth={(id) => {
+            setSelectedId(id)
+            setEditor(null)
+            setMobileTab('themes')
+            setGrowthOpen(true)
+          }}
+          onEdit={(id) => {
+            setMobileTab('themes')
+            openEditById(id)
+          }}
+          onDelete={deleteIdeaById}
+          floatingQuickEnabled={mobileFloatingQuickEnabled}
+          floatingQuickOpacity={mobileFloatingQuickOpacity}
+        />
+
+        {quickToast && <div className="quick-toast mobile-quick-toast">✓ {quickToast}</div>}
+      </>
     )
   }
 
@@ -1280,10 +1552,13 @@ export default function App() {
       {inboxOpen && (
         <IdeaInbox
           items={inbox}
+          ideas={ideas}
           language={language}
           dropActive={inboxDropActive}
           onClose={() => setInboxOpen(false)}
           onRestore={restoreInboxItem}
+          onOrganize={organizeInboxItem}
+          onDelete={deleteInboxItem}
           onExtractBranch={extractInboxBranch}
           onMoveIdeaIntoInbox={moveIdeaToInbox}
         />
